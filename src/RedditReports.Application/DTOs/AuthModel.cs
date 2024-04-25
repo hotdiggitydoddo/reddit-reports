@@ -1,7 +1,7 @@
 ﻿using System.Runtime.Serialization;
 using Newtonsoft.Json;
 
-namespace RedditReports.Infrastructure
+namespace RedditReports.Application.DTOs
 {
 	public class AuthModel
 	{
@@ -12,7 +12,7 @@ namespace RedditReports.Infrastructure
 
 		[JsonProperty("expires_in")]
 		public int ExpiresIn { get; set; }
-		
+
 		public bool IsExpired => DateTime.UtcNow >= _expiration;
 
 		[OnDeserialized]

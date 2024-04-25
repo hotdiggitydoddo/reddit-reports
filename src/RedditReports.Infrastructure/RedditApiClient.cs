@@ -1,31 +1,38 @@
 ﻿using System.Net.Http.Headers;
 using System.Text;
+using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using RedditReports.Application;
 using RedditReports.Application.Abstractions;
+using RedditReports.Application.DTOs;
 using RedditReports.Application.DTOs.Posts;
+using RedditReports.Domain.Results;
 
 namespace RedditReports.Infrastructure
 {
 	public class RedditApiClient : IRedditApiClient
 	{
 		private readonly SemaphoreSlim _concurrencySemaphore;
+		private readonly ILogger<RedditApiClient> _logger;
+		private readonly IRedditReporterServiceSettings _config;
 		private int _remainingRequests;
 		private int _rateLimitResetTime;
 		private AuthModel? _authModel;
 
-		private const string RedditBaseUrl = "https://oauth.reddit.com";
-		private const string UserAgent = "RedditReports/0.0.1";
-
-		private int _processed = 0;
+		private readonly object _lock = new object();
+		
+		private int _dispatchedRequests;
+		private int _processed;
 
 		public event EventHandler<RedditDataReceivedEventArgs> RedditDataReceived;
 
-		public RedditApiClient()
+		public RedditApiClient(ILogger<RedditApiClient> logger, IRedditReporterServiceSettings config)
 		{
-			_concurrencySemaphore = new SemaphoreSlim(10); // Adjust the concurrency limit as needed
+			_logger = logger;
+			_config = config;
 			_remainingRequests = 60; // Initial value, adjust according to Reddit API rate limit
 			_rateLimitResetTime = 600; // Initial value
+			_concurrencySemaphore = new SemaphoreSlim(_config.NumConcurrentConnections); // Adjust the concurrency limit as needed
 		}
 
 		public async Task FetchAsync(string subredditName)
@@ -38,24 +45,33 @@ namespace RedditReports.Infrastructure
 					//exception? //log?
 					return;
 				}
-				_authModel = result.Result!;
 			}
 
 			var after = string.Empty;
-			var desiredRate = 20;
+			var desiredRate = _config.NumPostsPerRequest;
 
 			try
 			{
 				using (var httpClient = new HttpClient())
 				{
 					httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _authModel.AccessToken);
-					httpClient.DefaultRequestHeaders.Add("User-Agent", UserAgent);
+					httpClient.DefaultRequestHeaders.Add("User-Agent", _config.UserAgent);
 
 					while (after != null)
 					{
-						await WaitIfNeededAsync();
+						//await WaitIfNeededAsync();
 
-						var url = $"{RedditBaseUrl}/r/{subredditName}/new?limit={desiredRate}&after={after}"; // Adjust limit as needed
+						await _concurrencySemaphore.WaitAsync();
+						await WaitIfNeededAsync();
+						
+						var activeRequests = await GetNumDispatchedRequestsAsync();
+						var delay = TimeSpan.FromSeconds(await CalculateDelayAsync()); //TimeSpan.FromSeconds(after == string.Empty ? 0 : (float)_rateLimitResetTime / (_remainingRequests - activeRequests));
+						_logger.LogInformation($"subreddit: {subredditName} | requests remaining: {_remainingRequests} | time to reset: {_rateLimitResetTime} | active requests: {activeRequests} | delay: {delay}");
+						// Wait before next request to avoid exceeding rate limit
+						await Task.Delay(delay);
+
+						var url = $"{_config.RedditBaseUri}/r/{subredditName}/new?limit={desiredRate}&after={after}"; // Adjust limit as needed
+						await IncreaseDispatchedRequestsAsync();
 						var response = await httpClient.GetAsync(url);
 						response.EnsureSuccessStatusCode(); // Check for successful response (200 OK)
 
@@ -66,7 +82,7 @@ namespace RedditReports.Infrastructure
 						var responseJsonString = await response.Content.ReadAsStringAsync();
 						var postData = JsonConvert.DeserializeObject<PostContainer>(responseJsonString); // Assuming a Post class exists
 						after = postData?.Data.after ?? null;
-;
+						
 						_processed += postData.Data.Children.Count;
 
 						var eventArgs = new RedditDataReceivedEventArgs()
@@ -79,21 +95,17 @@ namespace RedditReports.Infrastructure
 							eventArgs.Posts.Add(post.Data);
 						}
 						OnThresholdReached(eventArgs);
+					
+						await DecreaseDispatchedRequestsAsync();
+						_concurrencySemaphore.Release(); // Release semaphore slot
 
-						var delay = TimeSpan.FromSeconds(_rateLimitResetTime / (_remainingRequests + 1.0f));
-						
-						//DEBUG
-						Console.WriteLine($"requests remaining: {_remainingRequests} | time to reset: {_rateLimitResetTime} | delay: {delay}");
-
-						// Wait before next request to avoid exceeding rate limit
-						await Task.Delay(delay); // Convert delay to milliseconds
 						
 					}
 				}
 			}
 			catch (Exception ex)
 			{
-
+				await DecreaseDispatchedRequestsAsync();
 			}
 			finally
 			{
@@ -108,7 +120,7 @@ namespace RedditReports.Infrastructure
 			await _concurrencySemaphore.WaitAsync(); // Acquire semaphore slot
 			try
 			{
-				using (var httpClient =  new HttpClient()) 
+				using (var httpClient = new HttpClient())
 				{
 					var response = await httpClient.SendAsync(requestMessage);
 					response.EnsureSuccessStatusCode();
@@ -116,7 +128,6 @@ namespace RedditReports.Infrastructure
 
 					throw new Exception(); // await response.Content.ReadAsStringAsync() as TResponse;
 				}
-				
 			}
 			finally
 			{
@@ -128,11 +139,35 @@ namespace RedditReports.Infrastructure
 		{
 			var resetDateTime = DateTimeOffset.FromUnixTimeSeconds(_rateLimitResetTime).UtcDateTime;
 			// Wait until the rate limit resets if necessary
-			while (_remainingRequests <= 0 && DateTime.UtcNow < resetDateTime)
+			var dispatched = await GetNumDispatchedRequestsAsync();
+			while (_remainingRequests - dispatched  <= 0 && DateTime.UtcNow < resetDateTime)
 			{
 				var delay = resetDateTime - DateTime.UtcNow;
 				await Task.Delay(delay);
 			}
+		}
+
+		private async Task<float> CalculateDelayAsync()
+		{
+			// Ensure timeToReset is non-negative (handle potential underflow)
+			var timeToReset = Math.Max(_rateLimitResetTime, 0);
+
+			// Minimum delay to avoid excessive loops
+			const float minimumDelay = 1.0f; // Adjust as needed
+
+			var activeRequests = await GetNumDispatchedRequestsAsync();
+
+			// Ideally, no delay is needed if requestsRemaining > timeToReset
+			if (_remainingRequests - activeRequests > timeToReset)
+			{
+				return 0f;
+			}
+
+			// Calculate time remaining per request (considering safety buffer)
+			float timePerRequest = (float)timeToReset / Math.Max(_remainingRequests - activeRequests, 1u); // Avoid division by zero
+
+			// Return the maximum between timePerRequest and minimumDelay
+			return Math.Max(timePerRequest, minimumDelay);
 		}
 
 		public async Task ExecuteRequestsConcurrently(List<HttpRequestMessage> requestMessages)
@@ -145,46 +180,127 @@ namespace RedditReports.Infrastructure
 			await Task.WhenAll(tasks);
 		}
 
-		private async Task<HttpResponseResult<AuthModel>> AuthenticateAsync()
+		public async Task<HttpResponseResult> AuthenticateAsync()
 		{
-			var clientId = "IhxkX0NUrR0JKnMzRsfwnQ";
-			var clientSecret = "AwQtGW4bucQRJmtxgL1-kNwyKM9S0A";
-
-			using (var client = new HttpClient())
+			var sb = new StringBuilder(_config.AuthenticationUriTemplate);
+			var replacements = new List<(string key, string value)>
 			{
-				var formData = new Dictionary<string, string>
-				{
-					{ "grant_type", "password" },
-					{ "username", "unscrypted" },
-					{ "password", "Rll4ever" }
-				};
-				var content = new FormUrlEncodedContent(formData);
+			  ("clientId", _config.ClientId),
+			  ("redirectUri", Uri.EscapeDataString(_config.RedirectUri))
+			};
+			var authUrl = replacements.Aggregate(sb, (s, t) => s.Replace($"{{{t.key}}}", t.value)).ToString();
 
+			Console.WriteLine("Please visit the following URL to authorize the application:");
+			Console.ForegroundColor = ConsoleColor.DarkYellow;
+			Console.WriteLine(authUrl);
+			Console.ForegroundColor = ConsoleColor.Gray;
+			Console.WriteLine("After authorization, paste the redirect URL here:");
+
+			// Wait for user to paste the redirect URL containing the authorization code
+			var redirectUrl = Console.ReadLine();
+
+			// Extract authorization code from redirect URL
+			var authorizationCode = System.Web.HttpUtility.ParseQueryString(new Uri(redirectUrl).Query).Get("code");
+
+			// Exchange authorization code for access token
+			using (HttpClient client = new HttpClient())
+			{
+				var requestParams = new FormUrlEncodedContent(new[]
+				{
+				new KeyValuePair<string, string>("grant_type", "authorization_code"),
+				new KeyValuePair<string, string>("code", authorizationCode),
+				new KeyValuePair<string, string>("redirect_uri", _config.RedirectUri)
+			});
+
+				// Add authentication header
 				client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
-					"Basic", Convert.ToBase64String(Encoding.ASCII.GetBytes($"{clientId}:{clientSecret}")));
+					"Basic", Convert.ToBase64String(Encoding.ASCII.GetBytes($"{_config.ClientId}:{_config.ClientSecret}")));
 
-				client.DefaultRequestHeaders.Add("User-Agent", "RedditReports/0.0.1");
+				// Set user agent
+				client.DefaultRequestHeaders.Add("User-Agent", _config.UserAgent);
 
-				var response = await client.PostAsync("https://www.reddit.com/api/v1/access_token", content);
-
-				if (!response.IsSuccessStatusCode)
+				// Make request to exchange code for access token
+				var tokenResponse = await client.PostAsync($"{_config.RedditBaseUri}/api/v1/access_token", requestParams);
+				if (!tokenResponse.IsSuccessStatusCode)
 				{
-					return new HttpResponseResult<AuthModel>
+					return new HttpResponseResult
 					{
-						ResponseStatusCode = (int)response.StatusCode,
+						ResponseStatusCode = (int)tokenResponse.StatusCode,
 					};
 				}
 
-				var responseContent = await response.Content.ReadAsStringAsync();
-				var authModel = JsonConvert.DeserializeObject<AuthModel>(responseContent);
-
-				return new HttpResponseResult<AuthModel>
+				var responseContent = await tokenResponse.Content.ReadAsStringAsync();
+				_authModel = JsonConvert.DeserializeObject<AuthModel>(responseContent);
+				
+				return new HttpResponseResult
 				{
-					ResponseStatusCode = (int)response.StatusCode,
-					Result = authModel
+					ResponseStatusCode = (int)tokenResponse.StatusCode,
 				};
-			};
+			}
 		}
+
+		private async Task IncreaseDispatchedRequestsAsync()
+		{
+			lock (_lock)
+			{
+				_dispatchedRequests++;
+			}
+		}
+		private async Task DecreaseDispatchedRequestsAsync()
+		{
+			lock (_lock)
+			{
+				_dispatchedRequests--;
+			}
+		}
+		private Task<int> GetNumDispatchedRequestsAsync() 
+		{
+			lock (_lock)
+			{
+				return Task.FromResult(_dispatchedRequests);
+			}
+		}
+
+		//private async Task<HttpResponseResult<AuthModel>> AuthenticateAsync()
+		//{
+		//	var clientId = "IhxkX0NUrR0JKnMzRsfwnQ";
+		//	var clientSecret = "AwQtGW4bucQRJmtxgL1-kNwyKM9S0A";
+
+		//	using (var client = new HttpClient())
+		//	{
+		//		var formData = new Dictionary<string, string>
+		//		{
+		//			{ "grant_type", "password" },
+		//			{ "username", "unscrypted" },
+		//			{ "password", "Rll4ever" }
+		//		};
+		//		var content = new FormUrlEncodedContent(formData);
+
+		//		client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+		//			"Basic", Convert.ToBase64String(Encoding.ASCII.GetBytes($"{clientId}:{clientSecret}")));
+
+		//		client.DefaultRequestHeaders.Add("User-Agent", "RedditReports/0.0.1");
+
+		//		var response = await client.PostAsync("https://www.reddit.com/api/v1/access_token", content);
+
+		//		if (!response.IsSuccessStatusCode)
+		//		{
+		//			return new HttpResponseResult<AuthModel>
+		//			{
+		//				ResponseStatusCode = (int)response.StatusCode,
+		//			};
+		//		}
+
+		//		var responseContent = await response.Content.ReadAsStringAsync();
+		//		var authModel = JsonConvert.DeserializeObject<AuthModel>(responseContent);
+
+		//		return new HttpResponseResult<AuthModel>
+		//		{
+		//			ResponseStatusCode = (int)response.StatusCode,
+		//			Result = authModel
+		//		};
+		//	};
+		//}
 
 		private void OnThresholdReached(RedditDataReceivedEventArgs e)
 		{

@@ -20,10 +20,18 @@ namespace RedditReports.Application
 
 		public async Task GoAsync()
 		{
+			var authResult = await _redditApiClient.AuthenticateAsync();
+			if (authResult == null || !authResult.Success) 
+			{
+				return;
+			}
+
 			var tasks = new ConcurrentBag<Task>();
 			while (true)
 			{
+				Console.ForegroundColor = ConsoleColor.Blue;
 				Console.WriteLine("Type the name of a subreddit to track, or just hit enter to exit:");
+				Console.ForegroundColor = ConsoleColor.Gray;
 				var subreddit = Console.ReadLine();
 				if (string.IsNullOrWhiteSpace(subreddit))
 				{
@@ -45,20 +53,38 @@ namespace RedditReports.Application
 					return y;
 				});
 
-				if (e.AdditionalPostsAvailable) return;
+				if (e.AdditionalPostsAvailable || subreddit.Posts.Count == 0) return;
 
 				var topUser = subreddit.GetUserWithMostPosts();
 				var topPost = subreddit.GetMostUpvotedPost();
 
-				Console.WriteLine($"Totals for Subreddit \"{subreddit.Name}\"...");
+				Console.ForegroundColor = ConsoleColor.DarkYellow;
+				Console.Write($"\nTotals for Subreddit \"");
+				Console.ForegroundColor = ConsoleColor.Gray;
+				Console.Write(subreddit.Name);
+				Console.ForegroundColor = ConsoleColor.DarkYellow;
+				Console.WriteLine($"\"");
 
-				Console.WriteLine($"Top User: {topUser.Item1}");
-				Console.WriteLine($"Post Count: {topUser.Item2}");
+				Console.ForegroundColor = ConsoleColor.DarkYellow;
+				Console.Write("Top User: ");
+				Console.ForegroundColor = ConsoleColor.Gray;
+				Console.WriteLine($"{topUser.Item1}");
+				Console.ForegroundColor = ConsoleColor.DarkYellow;
+				Console.Write("Post Count: ");
+				Console.ForegroundColor = ConsoleColor.Gray;
+				Console.WriteLine($"{topUser.Item2}");
+				Console.ForegroundColor = ConsoleColor.DarkGray;
 				Console.WriteLine("-=-=-=-=-=-=");
-				Console.WriteLine($"Top Post: {topPost.Item1}");
-				Console.WriteLine($"Upvote Count: {topPost.Item2}");
+				Console.ForegroundColor = ConsoleColor.DarkYellow;
+				Console.Write($"Top Post: ");
+				Console.ForegroundColor = ConsoleColor.Gray;
+				Console.WriteLine($"{topPost.Item1}");
+				Console.ForegroundColor = ConsoleColor.DarkYellow;
+				Console.Write($"Upvote Count: ");
+				Console.ForegroundColor = ConsoleColor.Gray;
+				Console.WriteLine($"{topPost.Item2}");
 				Console.WriteLine();
-
+				Console.ForegroundColor = ConsoleColor.Gray;
 				_subreddits.TryRemove(subreddit.Name, out _);
 			}
 			catch (Exception ex)

@@ -1,10 +1,10 @@
 ﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using RedditReports.Application;
 using RedditReports.Application.Abstractions;
 using RedditReports.Domain.Abstractions;
-using RedditReports.Domain.Models;
 using RedditReports.Infrastructure;
 
 namespace RedditReports.ConsoleApp
@@ -21,9 +21,13 @@ namespace RedditReports.ConsoleApp
 				{
 					services.AddTransient<IRedditReporterService, RedditReporterService>();
 					services.AddTransient<IRedditApiClient, RedditApiClient>();
+					services.AddSingleton<IRedditReporterServiceSettings, RedditReporterServiceSettings>(resolver =>
+		resolver.GetRequiredService<IOptions<RedditReporterServiceSettings>>().Value);
+					services.Configure<RedditReporterServiceSettings>(context.Configuration
+						.GetRequiredSection(nameof(RedditReporterServiceSettings)));
 				})
 				.Build();
-			
+
 			var svc = ActivatorUtilities.CreateInstance<RedditReporterService>(host.Services);
 			await svc.GoAsync();
 
@@ -79,7 +83,7 @@ namespace RedditReports.ConsoleApp
 		{
 			builder.SetBasePath(Directory.GetCurrentDirectory())
 				.AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
-				.AddJsonFile($"appsettings.{Environment.GetEnvironmentVariable("HOSTING_ENVIRONMENT") ?? "Production"}.json")
+				.AddJsonFile($"appsettings.{Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") ?? "Production"}.json")
 				.AddEnvironmentVariables();
 		}
 	}
