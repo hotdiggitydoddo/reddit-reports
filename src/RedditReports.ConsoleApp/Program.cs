@@ -22,7 +22,7 @@ namespace RedditReports.ConsoleApp
 					services.AddTransient<IRedditReporterService, RedditReporterService>();
 					services.AddTransient<IRedditApiClient, RedditApiClient>();
 					services.AddSingleton<IRedditReporterServiceSettings, RedditReporterServiceSettings>(resolver =>
-		resolver.GetRequiredService<IOptions<RedditReporterServiceSettings>>().Value);
+						resolver.GetRequiredService<IOptions<RedditReporterServiceSettings>>().Value);
 					services.Configure<RedditReporterServiceSettings>(context.Configuration
 						.GetRequiredSection(nameof(RedditReporterServiceSettings)));
 				})
@@ -30,53 +30,6 @@ namespace RedditReports.ConsoleApp
 
 			var svc = ActivatorUtilities.CreateInstance<RedditReporterService>(host.Services);
 			await svc.StartAsync();
-
-			//var a = new RedditApiClient();
-
-			//string subreddit = "subreddit";
-			//string after = null;
-			//List<RedditPost> allPosts = new List<RedditPost>();
-			//string latestPostId = null;
-
-			////while (true) // Loop continuously for near real-time updates
-			//{
-			//	//// Fetch a smaller chunk of new posts
-			//	var task1 = a.FetchAsync("music");
-			//	var task2 = a.FetchAsync("funny");
-			//	var task3 = a.FetchAsync("jokes");
-			//	var task4 = a.FetchAsync("worldnews");
-			//	var task5 = a.FetchAsync("patientgamers");
-
-			//	await Task.WhenAll(task1, task2, task3, task4, task5);
-			//	// Wait for the task to complete
-			//	var postsChunk = new List<RedditPost>();// await task1;
-
-			//	// Process retrieved posts
-			//	foreach (var post in postsChunk)
-			//	{
-			//		if (allPosts.Count == 0 || post.Id != latestPostId)
-			//		{
-			//			allPosts.Add(post);
-			//		}
-			//		latestPostId = post.Id; // Update latestPostId for next iteration
-			//	}
-
-			//	// Maintain top 1000 posts (optional)
-			//	if (allPosts.Count > 1000)
-			//	{
-			//		allPosts.RemoveRange(1000, allPosts.Count - 1000);
-			//	}
-
-			//	// Update logic based on your requirements (e.g., sorting)
-			//	// ...
-
-			//	// Update 'after' for next iteration
-			//	after = postsChunk.LastOrDefault()?.After;
-
-			//	// Introduce a delay to avoid overwhelming Reddit's API
-			//	int delay = 1;
-			//	//await Task.Delay(delay * 1000); // Replace 'delay' with appropriate value
-			//}
 		}
 
 		private static void BuildConfig(IConfigurationBuilder builder)

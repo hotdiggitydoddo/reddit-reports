@@ -3,7 +3,6 @@ using System.Net.Http.Headers;
 using System.Text;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
-using RedditReports.Application;
 using RedditReports.Application.Abstractions;
 using RedditReports.Application.DTOs;
 using RedditReports.Application.DTOs.Posts;

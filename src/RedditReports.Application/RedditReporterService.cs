@@ -41,6 +41,11 @@ namespace RedditReports.Application
 				{
 					break;
 				}
+				if (_subreddits.ContainsKey(subreddit))
+				{
+					Console.WriteLine($"Already searching \"{subreddit}\".  Please try again.");
+					continue;
+				}
 				var task = Task.Run(GetPostsForSubredditAsync(subreddit));
 				tasks.Add(task);
 			}
