@@ -29,7 +29,7 @@ namespace RedditReports.ConsoleApp
 				.Build();
 
 			var svc = ActivatorUtilities.CreateInstance<RedditReporterService>(host.Services);
-			await svc.GoAsync();
+			await svc.StartAsync();
 
 			//var a = new RedditApiClient();
 

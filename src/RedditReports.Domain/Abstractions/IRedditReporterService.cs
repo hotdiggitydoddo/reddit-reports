@@ -2,6 +2,6 @@
 {
 	public interface IRedditReporterService
 	{
-		Task GoAsync();
+		Task StartAsync();
 	}
 }

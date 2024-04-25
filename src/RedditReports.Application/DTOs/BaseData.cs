@@ -11,9 +11,9 @@ namespace RedditReports.Application.DTOs
 		public int? Dist { get; set; }
 
 		[JsonProperty("after")]
-		public string after { get; set; }
+		public string After { get; set; }
 
 		[JsonProperty("before")]
-		public string before { get; set; }
+		public string Before { get; set; }
 	}
 }

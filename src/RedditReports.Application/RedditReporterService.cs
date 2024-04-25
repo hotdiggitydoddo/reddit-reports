@@ -1,29 +1,32 @@
 ﻿using System.Collections.Concurrent;
+using System.Net;
+using Microsoft.Extensions.Logging;
 using RedditReports.Application.Abstractions;
 using RedditReports.Domain.Abstractions;
 using RedditReports.Domain.Models;
 
 namespace RedditReports.Application
 {
-	
-
-	public class RedditReporterService : IRedditReporterService, IDisposable
+	public class RedditReporterService : IRedditReporterService
 	{
 		private readonly IRedditApiClient _redditApiClient;
+		private readonly ILogger<RedditReporterService> _logger;
 		private readonly ConcurrentDictionary<string, Subreddit> _subreddits = new();
-		
 
-		public RedditReporterService(IRedditApiClient redditApiClient)
+		public RedditReporterService(IRedditApiClient redditApiClient, ILogger<RedditReporterService> logger)
 		{
 			_redditApiClient = redditApiClient;
-			_redditApiClient.RedditDataReceived += OnRedditDataReceived;
+			_logger = logger;
 		}
 
-		public async Task GoAsync()
+		public async Task StartAsync()
 		{
 			var authResult = await _redditApiClient.AuthenticateAsync();
-			if (authResult == null || !authResult.Success) 
+			if (!authResult.Success)
 			{
+				Console.ForegroundColor = ConsoleColor.Red;
+				Console.WriteLine($"Error (authentication): {authResult.ErrorMessage}");
+				Console.ForegroundColor = ConsoleColor.Gray;
 				return;
 			}
 
@@ -38,67 +41,114 @@ namespace RedditReports.Application
 				{
 					break;
 				}
-				var task = Task.Run(() => { _redditApiClient.FetchAsync(subreddit); });
+				var task = Task.Run(GetPostsForSubredditAsync(subreddit));
 				tasks.Add(task);
 			}
 			await Task.WhenAll(tasks);
+			Console.ForegroundColor = ConsoleColor.Green;
+			Console.WriteLine("Have a nice day!");
+			Console.ForegroundColor = ConsoleColor.Gray;
 		}
 
-		private void OnRedditDataReceived(object? sender, RedditDataReceivedEventArgs e)
+		private Func<Task?> GetPostsForSubredditAsync(string subreddit)
 		{
-			try
+			return async () =>
 			{
-				var subreddit = _subreddits.AddOrUpdate(e.SubredditName, new Subreddit(e.SubredditName, e.Posts), (x, y) =>
+				var after = string.Empty;
+				while (true)
 				{
-					y.Posts.AddRange(e.Posts);
-					return y;
-				});
+					var result = await _redditApiClient.FetchPostsAsync(subreddit, after);
+					if (!result.Success)
+					{
+						Console.Error.WriteLine(result.ErrorMessage);
+						
+						// Bail out completely if we've hit the rate limit
+						if (result.ResponseStatusCode == (int)HttpStatusCode.TooManyRequests)
+						{
+							return;
+						}
+						break;
+					}
 
-				if (e.AdditionalPostsAvailable || subreddit.Posts.Count == 0) return;
+					HandleNewPosts(result.Result!);
 
-				var topUser = subreddit.GetUserWithMostPosts();
-				var topPost = subreddit.GetMostUpvotedPost();
+					if (result.After == null)
+					{
+						if (!_logger.IsEnabled(LogLevel.Debug))
+						{
+							Console.WriteLine(".");
+						}
+						DisplaySubredditResults(result.Result!);
+						_subreddits.TryRemove(subreddit, out _);
+						if (_subreddits.Count == 0)
+						{
+							Console.ForegroundColor = ConsoleColor.Green;
+							Console.WriteLine("All requests completed.  Feed me more subreddits!");
+							Console.ForegroundColor = ConsoleColor.Gray;
+						}
+						break;
+					}
+					after = result.After;
 
-				Console.ForegroundColor = ConsoleColor.DarkYellow;
-				Console.Write($"\nTotals for Subreddit \"");
-				Console.ForegroundColor = ConsoleColor.Gray;
-				Console.Write(subreddit.Name);
-				Console.ForegroundColor = ConsoleColor.DarkYellow;
-				Console.WriteLine($"\"");
-
-				Console.ForegroundColor = ConsoleColor.DarkYellow;
-				Console.Write("Top User: ");
-				Console.ForegroundColor = ConsoleColor.Gray;
-				Console.WriteLine($"{topUser.Item1}");
-				Console.ForegroundColor = ConsoleColor.DarkYellow;
-				Console.Write("Post Count: ");
-				Console.ForegroundColor = ConsoleColor.Gray;
-				Console.WriteLine($"{topUser.Item2}");
-				Console.ForegroundColor = ConsoleColor.DarkGray;
-				Console.WriteLine("-=-=-=-=-=-=");
-				Console.ForegroundColor = ConsoleColor.DarkYellow;
-				Console.Write($"Top Post: ");
-				Console.ForegroundColor = ConsoleColor.Gray;
-				Console.WriteLine($"{topPost.Item1}");
-				Console.ForegroundColor = ConsoleColor.DarkYellow;
-				Console.Write($"Upvote Count: ");
-				Console.ForegroundColor = ConsoleColor.Gray;
-				Console.WriteLine($"{topPost.Item2}");
-				Console.WriteLine();
-				Console.ForegroundColor = ConsoleColor.Gray;
-				_subreddits.TryRemove(subreddit.Name, out _);
-			}
-			catch (Exception ex)
-			{
-
-				throw;
-			}
-			
+					// Calculate some kind of delay to help control the request rate
+					var delay = TimeSpan.FromSeconds((float)result.ResetTimeInSeconds / result.RemainingRequests);
+					if (_logger.IsEnabled(LogLevel.Debug))
+					{
+						_logger.LogDebug($"subreddit: {subreddit} | requests remaining: {result.RemainingRequests} | time to reset: {result.ResetTimeInSeconds} | delay: {delay}");
+					}
+					else
+					{
+						Console.Write(".");
+					}
+					await Task.Delay(delay);
+				}
+			};
 		}
 
-		public void Dispose()
+		private void HandleNewPosts(List<Post> posts)
 		{
-			_redditApiClient.RedditDataReceived -= OnRedditDataReceived;
+			if (posts == null || posts.Count == 0) { return; }
+			var subredditName = posts.First().Subreddit;
+			var subreddit = _subreddits.AddOrUpdate(subredditName, new Subreddit(subredditName, posts), (x, y) =>
+			{
+				y.Posts.AddRange(posts);
+				return y;
+			});
+		}
+
+		private void DisplaySubredditResults(List<Post> posts)
+		{
+			var subreddit = _subreddits[posts.First().Subreddit];
+			var topUser = subreddit.GetUserWithMostPosts();
+			var topPost = subreddit.GetMostUpvotedPost();
+
+			Console.ForegroundColor = ConsoleColor.DarkYellow;
+			Console.Write($"\nTotals for Subreddit \"");
+			Console.ForegroundColor = ConsoleColor.Gray;
+			Console.Write(subreddit.Name);
+			Console.ForegroundColor = ConsoleColor.DarkYellow;
+			Console.WriteLine($"\"");
+
+			Console.ForegroundColor = ConsoleColor.DarkYellow;
+			Console.Write("Top User: ");
+			Console.ForegroundColor = ConsoleColor.Gray;
+			Console.WriteLine($"{topUser.Item1}");
+			Console.ForegroundColor = ConsoleColor.DarkYellow;
+			Console.Write("Post Count: ");
+			Console.ForegroundColor = ConsoleColor.Gray;
+			Console.WriteLine($"{topUser.Item2}");
+			Console.ForegroundColor = ConsoleColor.DarkGray;
+			Console.WriteLine("-=-=-=-=-=-=");
+			Console.ForegroundColor = ConsoleColor.DarkYellow;
+			Console.Write($"Top Post: ");
+			Console.ForegroundColor = ConsoleColor.Gray;
+			Console.WriteLine($"{topPost.Item1}");
+			Console.ForegroundColor = ConsoleColor.DarkYellow;
+			Console.Write($"Upvote Count: ");
+			Console.ForegroundColor = ConsoleColor.Gray;
+			Console.WriteLine($"{topPost.Item2}");
+			Console.WriteLine();
+			Console.ForegroundColor = ConsoleColor.Gray;
 		}
 	}
 }

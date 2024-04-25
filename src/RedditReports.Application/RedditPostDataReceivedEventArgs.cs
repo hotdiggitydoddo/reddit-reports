@@ -2,7 +2,7 @@
 
 namespace RedditReports.Application
 {
-	public class RedditDataReceivedEventArgs
+	public class RedditPostDataReceivedEventArgs
 	{
 		public List<Post> Posts { get; } = new();
 		public bool AdditionalPostsAvailable { get; init; }
