@@ -12,17 +12,14 @@ namespace RedditReports.Infrastructure
 {
 	public class RedditApiClient : IRedditApiClient
 	{
-		private readonly SemaphoreSlim _concurrencySemaphore;
 		private readonly ILogger<RedditApiClient> _logger;
 		private readonly IRedditReporterServiceSettings _config;
+		
 		private int _remainingRequests;
 		private int _rateLimitResetTime;
-		private AuthModel? _authModel;
 
-		private readonly object _lock = new object();
-		
-		private int _dispatchedRequests;
-		private int _processed;
+		private AuthModel? _authModel;
+		private readonly SemaphoreSlim _concurrencySemaphore;
 
 		public event EventHandler<RedditDataReceivedEventArgs> RedditDataReceived;
 
@@ -30,9 +27,7 @@ namespace RedditReports.Infrastructure
 		{
 			_logger = logger;
 			_config = config;
-			_remainingRequests = 60; // Initial value, adjust according to Reddit API rate limit
-			_rateLimitResetTime = 600; // Initial value
-			_concurrencySemaphore = new SemaphoreSlim(_config.NumConcurrentConnections); // Adjust the concurrency limit as needed
+			_concurrencySemaphore = new SemaphoreSlim(1); // Adjust the concurrency limit as needed
 		}
 
 		public async Task FetchAsync(string subredditName)
@@ -48,7 +43,6 @@ namespace RedditReports.Infrastructure
 			}
 
 			var after = string.Empty;
-			var desiredRate = _config.NumPostsPerRequest;
 
 			try
 			{
@@ -59,19 +53,9 @@ namespace RedditReports.Infrastructure
 
 					while (after != null)
 					{
-						//await WaitIfNeededAsync();
-
 						await _concurrencySemaphore.WaitAsync();
-						await WaitIfNeededAsync();
-						
-						var activeRequests = await GetNumDispatchedRequestsAsync();
-						var delay = TimeSpan.FromSeconds(await CalculateDelayAsync()); //TimeSpan.FromSeconds(after == string.Empty ? 0 : (float)_rateLimitResetTime / (_remainingRequests - activeRequests));
-						_logger.LogInformation($"subreddit: {subredditName} | requests remaining: {_remainingRequests} | time to reset: {_rateLimitResetTime} | active requests: {activeRequests} | delay: {delay}");
-						// Wait before next request to avoid exceeding rate limit
-						await Task.Delay(delay);
 
-						var url = $"{_config.RedditBaseUri}/r/{subredditName}/new?limit={desiredRate}&after={after}"; // Adjust limit as needed
-						await IncreaseDispatchedRequestsAsync();
+						var url = $"{_config.RedditBaseUri}/r/{subredditName}/new?limit={_config.NumPostsPerRequest}&after={after}";
 						var response = await httpClient.GetAsync(url);
 						response.EnsureSuccessStatusCode(); // Check for successful response (200 OK)
 
@@ -83,8 +67,6 @@ namespace RedditReports.Infrastructure
 						var postData = JsonConvert.DeserializeObject<PostContainer>(responseJsonString); // Assuming a Post class exists
 						after = postData?.Data.after ?? null;
 						
-						_processed += postData.Data.Children.Count;
-
 						var eventArgs = new RedditDataReceivedEventArgs()
 						{
 							AdditionalPostsAvailable = after != null,
@@ -96,16 +78,17 @@ namespace RedditReports.Infrastructure
 						}
 						OnThresholdReached(eventArgs);
 					
-						await DecreaseDispatchedRequestsAsync();
 						_concurrencySemaphore.Release(); // Release semaphore slot
 
-						
+						var delay = TimeSpan.FromSeconds((float)_rateLimitResetTime / _remainingRequests); //CalculateWaitTime(_rateLimitUsed, _remainingRequests, _rateLimitResetTime, 1);
+						_logger.LogInformation($"subreddit: {subredditName} | requests remaining: {_remainingRequests} | time to reset: {_rateLimitResetTime} | delay: {delay}");
+						await Task.Delay(delay);
 					}
 				}
 			}
 			catch (Exception ex)
 			{
-				await DecreaseDispatchedRequestsAsync();
+				//await DecreaseDispatchedRequestsAsync();
 			}
 			finally
 			{
@@ -139,35 +122,43 @@ namespace RedditReports.Infrastructure
 		{
 			var resetDateTime = DateTimeOffset.FromUnixTimeSeconds(_rateLimitResetTime).UtcDateTime;
 			// Wait until the rate limit resets if necessary
-			var dispatched = await GetNumDispatchedRequestsAsync();
-			while (_remainingRequests - dispatched  <= 0 && DateTime.UtcNow < resetDateTime)
+			while (_remainingRequests <= 0 && DateTime.UtcNow < resetDateTime)
 			{
 				var delay = resetDateTime - DateTime.UtcNow;
 				await Task.Delay(delay);
 			}
 		}
 
-		private async Task<float> CalculateDelayAsync()
+		public float CalculateWaitTime(int rateLimitUsed, int rateLimitRemaining, int rateLimitReset, int initialWaitTime)
 		{
-			// Ensure timeToReset is non-negative (handle potential underflow)
-			var timeToReset = Math.Max(_rateLimitResetTime, 0);
+			int currentTime = (int)DateTimeOffset.UtcNow.ToUnixTimeSeconds();
 
-			// Minimum delay to avoid excessive loops
-			const float minimumDelay = 1.0f; // Adjust as needed
+			// Calculate the time until the rate limit resets (in seconds)
+			int resetTimeInSeconds = rateLimitReset - currentTime;
 
-			var activeRequests = await GetNumDispatchedRequestsAsync();
+			// If the reset time is in the past, consider it as 0
+			resetTimeInSeconds = Math.Max(resetTimeInSeconds, 0);
 
-			// Ideally, no delay is needed if requestsRemaining > timeToReset
-			if (_remainingRequests - activeRequests > timeToReset)
+			// Calculate the remaining requests per second until the rate limit resets
+			float requestsPerSecond = rateLimitRemaining / (float)resetTimeInSeconds;
+
+			// If there are enough remaining requests to stay under the rate limit
+			if (requestsPerSecond > 1.0)
 			{
-				return 0f;
+				// Calculate the time interval between each request to evenly distribute them
+				float timeBetweenRequests = 1.0f / requestsPerSecond;
+
+				// Convert the time interval to milliseconds and add a small buffer
+				int waitTime = (int)(timeBetweenRequests * 1000) + 100; // Adding a 100ms buffer
+
+				// Return the calculated wait time
+				return waitTime;
 			}
-
-			// Calculate time remaining per request (considering safety buffer)
-			float timePerRequest = (float)timeToReset / Math.Max(_remainingRequests - activeRequests, 1u); // Avoid division by zero
-
-			// Return the maximum between timePerRequest and minimumDelay
-			return Math.Max(timePerRequest, minimumDelay);
+			else
+			{
+				// If remaining requests are too low, wait until the rate limit resets
+				return resetTimeInSeconds * 1000; // Convert seconds to milliseconds
+			}
 		}
 
 		public async Task ExecuteRequestsConcurrently(List<HttpRequestMessage> requestMessages)
@@ -236,28 +227,6 @@ namespace RedditReports.Infrastructure
 				{
 					ResponseStatusCode = (int)tokenResponse.StatusCode,
 				};
-			}
-		}
-
-		private async Task IncreaseDispatchedRequestsAsync()
-		{
-			lock (_lock)
-			{
-				_dispatchedRequests++;
-			}
-		}
-		private async Task DecreaseDispatchedRequestsAsync()
-		{
-			lock (_lock)
-			{
-				_dispatchedRequests--;
-			}
-		}
-		private Task<int> GetNumDispatchedRequestsAsync() 
-		{
-			lock (_lock)
-			{
-				return Task.FromResult(_dispatchedRequests);
 			}
 		}
 

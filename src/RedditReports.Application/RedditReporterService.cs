@@ -11,6 +11,7 @@ namespace RedditReports.Application
 	{
 		private readonly IRedditApiClient _redditApiClient;
 		private readonly ConcurrentDictionary<string, Subreddit> _subreddits = new();
+		
 
 		public RedditReporterService(IRedditApiClient redditApiClient)
 		{
