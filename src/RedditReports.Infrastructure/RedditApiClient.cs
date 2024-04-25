@@ -42,7 +42,7 @@ namespace RedditReports.Infrastructure
 			}
 
 			var after = string.Empty;
-			var desiredRate = 5;
+			var desiredRate = 20;
 
 			try
 			{
@@ -65,9 +65,15 @@ namespace RedditReports.Infrastructure
 
 						var responseJsonString = await response.Content.ReadAsStringAsync();
 						var postData = JsonConvert.DeserializeObject<PostContainer>(responseJsonString); // Assuming a Post class exists
+						after = postData?.Data.after ?? null;
+;
 						_processed += postData.Data.Children.Count;
 
-						var eventArgs = new RedditDataReceivedEventArgs();
+						var eventArgs = new RedditDataReceivedEventArgs()
+						{
+							AdditionalPostsAvailable = after != null,
+							SubredditName = subredditName
+						};
 						foreach (var post in postData.Data.Children)
 						{
 							eventArgs.Posts.Add(post.Data);
@@ -75,21 +81,19 @@ namespace RedditReports.Infrastructure
 						OnThresholdReached(eventArgs);
 
 						var delay = TimeSpan.FromSeconds(_rateLimitResetTime / (_remainingRequests + 1.0f));
-						//Console.WriteLine($" requests remaining: {_remainingRequests} | time to reset: {_rateLimitResetTime} | delay: {delay}");
+						
+						//DEBUG
+						Console.WriteLine($"requests remaining: {_remainingRequests} | time to reset: {_rateLimitResetTime} | delay: {delay}");
 
 						// Wait before next request to avoid exceeding rate limit
 						await Task.Delay(delay); // Convert delay to milliseconds
 						
-						if (!string.IsNullOrWhiteSpace(postData.Data.after))
-						{
-							after = postData.Data.after;
-						}
-						else
-						{
-							after = null;
-						}
 					}
 				}
+			}
+			catch (Exception ex)
+			{
+
 			}
 			finally
 			{
