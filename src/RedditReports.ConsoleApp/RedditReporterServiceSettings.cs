@@ -5,7 +5,7 @@ namespace RedditReports.ConsoleApp
 	internal class RedditReporterServiceSettings : IRedditReporterServiceSettings
 	{
 		public string ClientId { get; init; }
-		public string ClientSecret { get; init; }
+		public string ClientSecret => Environment.GetEnvironmentVariable("CLIENT_SECRET");
 		public string AuthenticationUriTemplate { get; init; }
 		public string RedditBaseUri { get; init; }
 		public string RedirectUri { get; init; }

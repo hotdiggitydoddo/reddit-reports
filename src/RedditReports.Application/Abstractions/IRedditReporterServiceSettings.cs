@@ -3,7 +3,7 @@
 	public interface IRedditReporterServiceSettings
 	{
 		string ClientId { get; init; }
-		string ClientSecret { get; init; }
+		string ClientSecret { get; }
 		string AuthenticationUriTemplate { get; init; }
 		string RedditBaseUri { get; init; }
 		string RedirectUri { get; init; }

@@ -13,8 +13,14 @@ namespace RedditReports.Application
 		private readonly ILogger<RedditReporterService> _logger;
 		private readonly ConcurrentDictionary<string, Subreddit> _subreddits = new();
 
-		public RedditReporterService(IRedditApiClient redditApiClient, ILogger<RedditReporterService> logger)
+		public RedditReporterService(IRedditApiClient redditApiClient, ILogger<RedditReporterService> logger, IRedditReporterServiceSettings settings)
 		{
+			if (string.IsNullOrWhiteSpace(settings.ClientSecret))
+			{
+				var ex = new ApplicationException($"{nameof(settings.ClientSecret)} does not exist. Please obtain it and add it as an environment variable.");
+				logger.LogCritical(ex, ex.Message);
+				throw ex;
+			}
 			_redditApiClient = redditApiClient;
 			_logger = logger;
 		}
