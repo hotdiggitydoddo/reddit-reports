@@ -1,0 +1,57 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.9.34723.18
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "RedditReports.Domain", "src\RedditReports.Domain\RedditReports.Domain.csproj", "{16ED5951-4D66-4CE2-A3DC-8237200B09AF}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "RedditReports.ConsoleApp", "src\RedditReports.ConsoleApp\RedditReports.ConsoleApp.csproj", "{B3DC585E-AA78-4D94-BB68-3DBBA3F64E1A}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "RedditReports.Application", "src\RedditReports.Application\RedditReports.Application.csproj", "{E8D1D3C6-1D2C-433D-A10D-7A237F3901B6}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{92CCFF60-05AF-4ED3-B05E-B24D97285898}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Core", "Core", "{E8892FE5-AC35-4D02-8646-1F9FB76430DB}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "External", "External", "{83761E77-F565-41B7-90FC-E178C30264A4}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "RedditReports.Infrastructure", "src\RedditReports.Infrastructure\RedditReports.Infrastructure.csproj", "{5B382DFA-4844-4603-816B-698A6B643F63}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{16ED5951-4D66-4CE2-A3DC-8237200B09AF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{16ED5951-4D66-4CE2-A3DC-8237200B09AF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{16ED5951-4D66-4CE2-A3DC-8237200B09AF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{16ED5951-4D66-4CE2-A3DC-8237200B09AF}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B3DC585E-AA78-4D94-BB68-3DBBA3F64E1A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B3DC585E-AA78-4D94-BB68-3DBBA3F64E1A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B3DC585E-AA78-4D94-BB68-3DBBA3F64E1A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B3DC585E-AA78-4D94-BB68-3DBBA3F64E1A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E8D1D3C6-1D2C-433D-A10D-7A237F3901B6}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E8D1D3C6-1D2C-433D-A10D-7A237F3901B6}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E8D1D3C6-1D2C-433D-A10D-7A237F3901B6}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E8D1D3C6-1D2C-433D-A10D-7A237F3901B6}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5B382DFA-4844-4603-816B-698A6B643F63}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5B382DFA-4844-4603-816B-698A6B643F63}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5B382DFA-4844-4603-816B-698A6B643F63}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5B382DFA-4844-4603-816B-698A6B643F63}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{16ED5951-4D66-4CE2-A3DC-8237200B09AF} = {E8892FE5-AC35-4D02-8646-1F9FB76430DB}
+		{B3DC585E-AA78-4D94-BB68-3DBBA3F64E1A} = {83761E77-F565-41B7-90FC-E178C30264A4}
+		{E8D1D3C6-1D2C-433D-A10D-7A237F3901B6} = {E8892FE5-AC35-4D02-8646-1F9FB76430DB}
+		{E8892FE5-AC35-4D02-8646-1F9FB76430DB} = {92CCFF60-05AF-4ED3-B05E-B24D97285898}
+		{83761E77-F565-41B7-90FC-E178C30264A4} = {92CCFF60-05AF-4ED3-B05E-B24D97285898}
+		{5B382DFA-4844-4603-816B-698A6B643F63} = {83761E77-F565-41B7-90FC-E178C30264A4}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {035F4845-FD22-407D-83CC-6FD408898F67}
+	EndGlobalSection
+EndGlobal
