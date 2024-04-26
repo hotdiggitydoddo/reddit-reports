@@ -4,8 +4,7 @@
             "commandName": "Project",
             "dotnetRunMessages": true,
             "environmentVariables": {
-                "DOTNET_ENVIRONMENT": "Development",
-                "CLIENT_SECRET": "AwQtGW4bucQRJmtxgL1-kNwyKM9S0A"
+                "DOTNET_ENVIRONMENT": "Development"
             }
         }
     }
